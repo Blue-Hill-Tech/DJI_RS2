@@ -1,4 +1,4 @@
-README.md
+## README.md
 
 1. For the motion-control workflow (recording and replaying gimbal movements),  
 please see **Log and Replay Movements** in the main [`README.md`](https://github.com/Blue-Hill-Tech/DJI_RS2/blob/main/DJI_RS2_LogAndReplay/README.md).
