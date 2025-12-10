@@ -1,0 +1,8 @@
+sudo ifconfig can0 txqueuelen 5000
+sudo ip link set can0 up type can bitrate 1000000
+
+
+
+pip3 install python-can icecream pandas pyserial playsound
+
+

@@ -1,0 +1,60 @@
+#!/usr/bin/python3
+
+from dji_controller import DJIController
+
+import os
+import sys
+import time
+
+file_dir = os.path.dirname(__file__)
+sys.path.append(file_dir)
+
+if __name__ == "__main__":
+    try:
+        controller = DJIController("can0")
+        try:
+            controller.bus.flush_tx_buffer()
+        except NotImplementedError:
+            pass
+        os.system('clear')
+        print("\n"+"\n"+"\n")
+        print("         Starting Log Recording")
+        time.sleep(1)
+        print("         in 3...")
+        time.sleep(1)
+        print("         2...")
+        time.sleep(1)
+        print("         1...")
+        time.sleep(1)
+        print("         MARK" + "\n")
+        print("         ■■■■■■■■■■■■")
+        print("\n")
+        print("         Recording in progress, press CTRL+C to stop")
+
+        os.system('rm -r '+ file_dir + '/dji.log')
+        os.system('touch ' + file_dir + '/dji.log')
+        try:
+            controller.bus.flush_tx_buffer()
+        except NotImplementedError:
+            pass
+        while True:
+            os.system('touch ' + file_dir + '/dji.log')
+            output = "Pitch: " + \
+                     str(controller.pitch) + ", Yaw: " + \
+                     str(controller.yaw) + ", Roll: " + str(controller.roll) + ", Focus: " + str(controller.focus)
+            # print(output)
+            # write log to file
+            logFile = open(file_dir+"/dji.log", "a+")
+
+            pose_str = "{:>5.1f}".format(controller.yaw) + "  {:>5.1f}".format(controller.roll) + "  {:>5.1f}".format(controller.pitch)
+            print(pose_str)
+
+            logFile.write(
+                str(controller.yaw) + "," + str(controller.pitch) + "," + str(controller.roll) + "," + str(
+                    int(controller.focus)) + "\n")
+            time.sleep(.05)
+    except KeyboardInterrupt:
+        os.system('clear')
+        os._exit(0)
+
+

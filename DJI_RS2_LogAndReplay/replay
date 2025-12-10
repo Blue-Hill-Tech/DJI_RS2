@@ -1,0 +1,121 @@
+#!/usr/bin/python3
+
+import time
+import os
+import sys
+import pandas as pd
+from playsound import playsound
+
+file_dir = os.path.dirname(__file__)
+sys.path.append(file_dir)
+
+from dji_controller import DJIController
+
+import numpy as np
+
+class PID:
+    def __init__(self, kp, ki, kd, dt):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.dt = dt
+        self.previous_error = np.array([0.0, 0.0, 0.0])
+        self.integral = np.array([0.0, 0.0, 0.0])
+
+    def update(self, desired_pose, current_pose):
+        error = desired_pose - current_pose
+        self.integral += error * self.dt
+        derivative = (error - self.previous_error) / self.dt
+        output = self.kp * error + self.ki * self.integral + self.kd * derivative
+        self.previous_error = error
+        return output
+
+if __name__ == "__main__":
+
+    controller = DJIController("can0")
+
+    try:
+        controller.bus.flush_tx_buffer()
+    except NotImplementedError:
+        pass
+    os.system('clear')
+    print("\n" + "\n" + "\n")
+    print("         Starting Log Playback")
+
+    #WAIT TIME BEFORE FULL LOG PLAYBACK
+    #FOR PERFORMANCE PREP TIME
+    
+    print("         in" + "\n")
+    print("         3...")
+    playsound(file_dir + "/tone-1000.wav")
+    time.sleep(1)
+    print("         2...")
+    playsound(file_dir + "/tone-1000.wav")
+    time.sleep(1)
+    print("         1...")
+    playsound(file_dir + "/tone-1000.wav")
+    time.sleep(1)
+    print("         MARK" + "\n")
+    print("         ■■■■■■■■■■■■")
+    print("\n")
+
+
+    #WAIT TIME BEFORE FULL LOG PLAYBACK
+    #FOR PERFORMANCE PREP TIME
+    
+    playsound(file_dir + "/tone.wav")
+    time.sleep(.5)
+    filename = (file_dir + "/dji.log")
+    #print(filename)
+
+    #ADJUST SPEED OF PAUSE MOVEMENT, NORMAL=1, 2x Faster = 2, 2xSlower=.5
+    #Will adjust pause movements, Normal is most accurate
+    speed=1
+
+    speedvar=speed*2
+
+    #controller.set_speed(100, 100, 100)
+
+    df = pd.read_csv(filename)
+    df = df[df.index % speedvar == 0]
+
+    kp = np.array([2, 2, 2]) * 1
+    ki = np.array([0.1, 0.1, 0.1]) * 1
+    kd = np.array([0.5, 0.5, 0.5]) * 1
+    dt = 0.1
+
+    pid_controller = PID(kp, ki, kd, dt)
+
+    starting_pose = True
+    for index, ypr in df.iterrows():
+        target_pose = np.array([float(ypr[0]), float(ypr[1]), float(ypr[2])])
+
+        if starting_pose:
+            controller.set_ypr(target_pose, dt * 10)
+            starting_pose = False
+            time.sleep(4)
+            continue
+
+
+        current_pose = np.array([controller.yaw, controller.pitch, controller.roll])
+        print("target  pose: {:>5.1f}".format(target_pose[0]) + "  {:>5.1f}".format(target_pose[2]) + "  {:>5.1f}".format(target_pose[1]))
+        print("current pose: {:>5.1f}".format(current_pose[0]) + "  {:>5.1f}".format(current_pose[2]) + "  {:>5.1f}".format(current_pose[1]))
+
+        controll_point = pid_controller.update(target_pose, current_pose)
+
+        controller.set_ypr(controll_point, dt * 2)
+
+
+        #controller.setFocControl(f)
+        time.sleep(dt)
+
+    print("\n" + "\n" + "\n")
+    print('         Log Playback Complete, returning to home')
+    try:
+        controller.bus.flush_tx_buffer()
+    except NotImplementedError:
+        pass
+    controller.set_pos(0, 0, 0)
+    time.sleep(4)
+    #os.system('clear')
+    os._exit(0)

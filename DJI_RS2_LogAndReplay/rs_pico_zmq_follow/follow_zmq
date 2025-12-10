@@ -1,0 +1,231 @@
+#!/usr/bin/python3
+"""
+follow_zmq_v8 - Ultra low-latency gimbal follower via ZMQ
+Optimizations:
+  - Event-driven wake: control thread wakes immediately on new data
+  - Higher control frequency: 500Hz (2ms)
+  - Async logger: control thread NEVER blocks on print
+  - 3 threads: ZMQ receiver, Gimbal control, Logger
+"""
+
+import zmq
+import time
+import os
+import sys
+import threading
+import queue
+import numpy as np
+
+file_dir = os.path.dirname(__file__)
+sys.path.append(file_dir)
+
+from dji_controller import DJIController
+
+
+# Async logger - control thread never blocks on print
+class AsyncLogger:
+    def __init__(self):
+        self.log_queue = queue.Queue(maxsize=1000)
+        self.running = True
+    
+    def log(self, msg):
+        """Non-blocking log - drops message if queue full"""
+        try:
+            self.log_queue.put_nowait(msg)
+        except queue.Full:
+            pass  # Drop message rather than block
+    
+    def stop(self):
+        self.running = False
+        self.log_queue.put(None)  # Sentinel to wake thread
+    
+    def run(self):
+        """Logger thread - handles all printing"""
+        while self.running:
+            try:
+                msg = self.log_queue.get(timeout=0.1)
+                if msg is not None:
+                    print(msg)
+            except queue.Empty:
+                pass
+        # Drain remaining messages
+        while not self.log_queue.empty():
+            msg = self.log_queue.get_nowait()
+            if msg is not None:
+                print(msg)
+        print("[LOGGER] Stopped")
+
+
+# Shared state with event-driven wake
+class SharedState:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.new_data_event = threading.Event()  # Wake control thread immediately
+        self.target = None
+        self.timestamp = None
+        self.msg_count = 0
+        self.running = True
+    
+    def set_target(self, target, timestamp=None):
+        with self.lock:
+            self.target = target
+            self.timestamp = timestamp
+            self.msg_count += 1
+        self.new_data_event.set()  # Wake control thread NOW
+    
+    def get_target(self):
+        with self.lock:
+            return self.target, self.timestamp, self.msg_count
+    
+    def wait_for_data(self, timeout):
+        """Wait for new data or timeout, returns True if new data"""
+        result = self.new_data_event.wait(timeout)
+        self.new_data_event.clear()
+        return result
+    
+    def stop(self):
+        with self.lock:
+            self.running = False
+        self.new_data_event.set()  # Wake thread to exit
+    
+    def is_running(self):
+        with self.lock:
+            return self.running
+
+
+def parse_euler_angles(msg):
+    """Parse Euler angles and timestamp from message: yaw,pitch,roll,timestamp"""
+    try:
+        if ',' in msg:
+            parts = msg.split(',')
+        else:
+            parts = msg.split()
+        
+        if len(parts) >= 3:
+            angles = np.array([float(parts[0]), float(parts[1]), float(parts[2])])
+            timestamp = float(parts[3]) if len(parts) >= 4 else None
+            return angles, timestamp
+    except (ValueError, IndexError):
+        pass
+    return None, None
+
+
+def zmq_receiver_thread(state, port):
+    """Thread 1: Receive ZMQ messages with minimal latency"""
+    context = zmq.Context()
+    socket = context.socket(zmq.PULL)
+    socket.setsockopt(zmq.CONFLATE, 1)  # Only keep latest message
+    socket.setsockopt(zmq.RCVHWM, 1)    # Minimal receive buffer
+    socket.bind(f"tcp://0.0.0.0:{port}")
+    socket.setsockopt(zmq.RCVTIMEO, 10)  # 10ms timeout for faster response
+    
+    print(f"[ZMQ] Listening on port {port}")
+    
+    while state.is_running():
+        try:
+            # Blocking receive with short timeout - more efficient than NOBLOCK + sleep
+            msg = socket.recv_string()
+            target, timestamp = parse_euler_angles(msg)
+            if target is not None:
+                state.set_target(target, timestamp)  # This wakes control thread
+        except zmq.Again:
+            pass  # Timeout, check running flag and retry
+    
+    socket.close()
+    context.term()
+    print("[ZMQ] Receiver stopped")
+
+
+def gimbal_control_thread(state, controller, logger):
+    """Thread 2: Ultra high-frequency gimbal control loop - NEVER BLOCKS"""
+    dt = 0.002  # 2ms = 500Hz control loop
+    last_count = 0
+    
+    logger.log(f"[GIMBAL] Control loop running at {1/dt:.0f}Hz")
+    
+    while state.is_running():
+        # Wait for new data OR timeout (event-driven, not polling)
+        state.wait_for_data(dt)
+        
+        target, timestamp, count = state.get_target()
+        
+        if target is not None:
+            # Send target directly to gimbal FIRST (lowest latency)
+            controller.set_ypr(target, dt)
+            
+            # Log on NEW messages only - non-blocking!
+            if count != last_count:
+                now = time.time()
+                delay_ms = (now - timestamp) * 1000 if timestamp is not None else 0
+                
+                # Get current pose
+                current_pose = np.array([
+                    controller.yaw,
+                    controller.pitch,
+                    controller.roll
+                ])
+                
+                ts_str = f"{timestamp:.3f}" if timestamp is not None else "N/A"
+                logger.log(f"[{count:6d}] T:{ts_str} | Delay:{delay_ms:5.1f}ms | Target: {target[0]:>7.2f} {target[1]:>7.2f} {target[2]:>7.2f} | "
+                           f"Current: {current_pose[0]:>7.2f} {current_pose[1]:>7.2f} {current_pose[2]:>7.2f}")
+                last_count = count
+    
+    logger.log("[GIMBAL] Control loop stopped")
+
+
+if __name__ == "__main__":
+    ZMQ_PORT = 5555
+    
+    print("\n" * 2)
+    print("=" * 50)
+    print("  DJI RS2/RS3 Gimbal ZMQ Follower (Low Latency)")
+    print("=" * 50)
+    print("[INFO] Dual-thread architecture for minimum latency")
+    print("[INFO] Press CTRL+C to stop\n")
+    
+    # Initialize DJI controller
+    try:
+        controller = DJIController("can0")
+        try:
+            controller.bus.flush_tx_buffer()
+        except NotImplementedError:
+            pass
+        print("[INFO] DJI Controller initialized")
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize: {e}")
+        print("[INFO] Run 'sudo can-up' first")
+        sys.exit(1)
+    
+    # Shared state and async logger
+    state = SharedState()
+    logger = AsyncLogger()
+    
+    # Start threads (3 threads now)
+    zmq_thread = threading.Thread(target=zmq_receiver_thread, args=(state, ZMQ_PORT), daemon=True)
+    gimbal_thread = threading.Thread(target=gimbal_control_thread, args=(state, controller, logger), daemon=True)
+    logger_thread = threading.Thread(target=logger.run, daemon=True)
+    
+    logger_thread.start()
+    zmq_thread.start()
+    gimbal_thread.start()
+    
+    print("-" * 50)
+    
+    try:
+        while True:
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        print("\n" + "-" * 50)
+        print("[INFO] Stopping...")
+        state.stop()
+        logger.stop()
+        
+        time.sleep(0.3)  # Wait for threads
+        
+        # Return to home
+        print("[INFO] Returning to home position...")
+        controller.set_pos(0, 0, 0)
+        time.sleep(2)
+        
+        print("[INFO] Done!")
+        os._exit(0)
