@@ -93,16 +93,6 @@ yaw,pitch,roll,timestamp
 
 Example: `10.5,-5.2,3.0,1764795277.393`
 
-## Versions
-
-| Version | Description |
-|---------|-------------|
-| v4 | Basic dual-thread with timestamp |
-| v5 | Print all messages |
-| v6 | Add delay calculation |
-| v7 | Event-driven, 500Hz control loop |
-| v8 | Async logger (recommended) |
-| v9 | With PID controller |
 
 ## Troubleshooting
 
