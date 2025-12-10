@@ -3,7 +3,7 @@
 For the motion-control workflow (recording and replaying gimbal movements),  
 please see **Log and Replay Movements** in the main `README.md`.
 
-For the ZMQ-based gimbal following setup used with the Raspberry Pi Pico,  
+For the ZMQ-based gimbal following setup used with the Pico 4,  
 see the folder:
 
 `rs_pico_zmq_follow/`
