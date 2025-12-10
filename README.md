@@ -1,12 +1,12 @@
 ## Additional Tools and Examples
 
-For users looking for the classic motion-control workflow (recording and replaying
-camera movements), please refer to **Log and Replay Movements** — see `README.md`
-in the root directory.
+For the motion-control workflow (recording and replaying gimbal movements),  
+please see **Log and Replay Movements** in the main `README.md`.
 
-For users interested in the ultra-low-latency ZMQ gimbal follower (RS2/RS3 controlled
-via real-time Euler angle streaming from a Pico or other device), please check the
-folder:rs_pico_zmq_follow/
+For the ZMQ-based gimbal following setup used with the Raspberry Pi Pico,  
+see the folder:
 
-This folder contains a minimal and high-performance example showing how to stream
-orientation data over ZMQ and drive the gimbal at 500 Hz with event-driven control.
+`rs_pico_zmq_follow/`
+
+This folder contains the ZMQ receiver and gimbal control scripts designed for  
+real-time orientation streaming from a Pico device.
